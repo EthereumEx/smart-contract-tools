@@ -1,6 +1,8 @@
 Smart Contract Tools for Eclipse
 ================================
 
+Latest version: (https://github.com/webdaford/smart-contract-tools).
+
 Open source tooling to develop Smart Contracts using the
 [Eclipse](https://eclipse.org) IDE.
 
