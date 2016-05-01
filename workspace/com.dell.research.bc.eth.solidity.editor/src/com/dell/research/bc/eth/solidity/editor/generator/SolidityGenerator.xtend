@@ -10,13 +10,23 @@
  *******************************************************************************/
 package com.dell.research.bc.eth.solidity.editor.generator
 
+import com.dell.research.bc.eth.solidity.editor.solidity.Assignment
 import com.dell.research.bc.eth.solidity.editor.solidity.Contract
 import com.dell.research.bc.eth.solidity.editor.solidity.DefinitionBody
+import com.dell.research.bc.eth.solidity.editor.solidity.Expression
+import com.dell.research.bc.eth.solidity.editor.solidity.ExpressionStatement
 import com.dell.research.bc.eth.solidity.editor.solidity.FunctionDefinition
+import com.dell.research.bc.eth.solidity.editor.solidity.QualifiedIdentifier
+import com.dell.research.bc.eth.solidity.editor.solidity.StandardVariableDeclaration
+import com.dell.research.bc.eth.solidity.editor.solidity.Statement
+import com.dell.research.bc.eth.solidity.editor.solidity.VarVariableDeclaration
+import com.dell.research.bc.eth.solidity.editor.solidity.VarVariableTupleVariableDeclaration
+import org.eclipse.emf.common.util.BasicEList
 import org.eclipse.emf.common.util.EList
 import org.eclipse.emf.ecore.resource.Resource
 import org.eclipse.xtext.generator.IFileSystemAccess
 import org.eclipse.xtext.generator.IGenerator
+import com.dell.research.bc.eth.solidity.editor.solidity.ReturnStatement
 
 /**
  * Generates code from your model files on save.
@@ -27,17 +37,22 @@ class SolidityGenerator implements IGenerator {
 
 	override void doGenerate(Resource resource, IFileSystemAccess fsa) {
 
-		//var foo = resource.getAllContents();
 		resource.allContents.filter(Contract).forall [
+			val varNames = getVarNames(it.body.variables)
+
+			val invocableFunctions = getInvocableFunctions(it.body.functions, varNames)
+			val queryableFunctions = getQueryableFunctions(it.body.functions, varNames)
 
 			fsa.generateFile(
 				it.name + '.go',
 				'''
 					«doFileHeader()»
 					«doFuncInit(it.body)»
-					«doFuncInvoke(it.body.functions)»
-					«doFuncQuery(it.body.functions)»
+					«doFuncInvoke(invocableFunctions)»
+					«doFuncQuery(queryableFunctions)»
 					«doFunctions(it.body.functions)»
+					«doWriteFunc»
+					«doReadFunc»
 				'''
 //			+ 
 //			resource.allContents
@@ -50,6 +65,57 @@ class SolidityGenerator implements IGenerator {
 
 	}
 
+	def EList<String> getVarNames(EList<Statement> variableDeclarations) {
+		var ret = new BasicEList<String>()
+		for (statement : variableDeclarations) {
+			ret.add(
+				switch statement {
+					StandardVariableDeclaration: statement.variable.name
+					VarVariableDeclaration: "varavar"
+					VarVariableTupleVariableDeclaration: "vvartup"
+				}
+			)
+		}
+		ret
+	}
+
+	def EList<FunctionDefinition> getInvocableFunctions(EList<FunctionDefinition> functions, EList<String> varNames) {
+		var ret = new BasicEList<FunctionDefinition>
+		for (function : functions) {
+		   if (hasVariableAssignment(function,varNames)) {
+		   	  ret.add(function)
+		   }			
+		}
+		ret
+	}
+	
+
+	def EList<FunctionDefinition> getQueryableFunctions(EList<FunctionDefinition> functions, EList<String> varNames) {
+		var ret = new BasicEList<FunctionDefinition>
+		for (function : functions) {
+		   if (!hasVariableAssignment(function,varNames)) {
+		   	  ret.add(function)
+		   }			
+		}
+		ret
+	}
+
+	def boolean hasVariableAssignment(FunctionDefinition function, EList<String> varNames) {
+		var ret = false
+		for (stmt : function.block.statements) {
+			switch stmt {
+				ExpressionStatement: switch expr : stmt.expression {
+					Assignment: ret = varNames.contains((expr.left as QualifiedIdentifier).identifier)
+				}
+			}
+			
+			if (ret) {
+				return true;
+			}
+		}
+		ret
+	}
+	
 	def doFileHeader() {
 		'''
 			package main
@@ -60,57 +126,77 @@ class SolidityGenerator implements IGenerator {
 					"github.com/hyperledger/fabric/core/chaincode/shim"
 			)
 			
-			// SimpleChaincode example simple Chaincode implementation
+			SimpleChaincode example simple Chaincode implementation
 			 			type SimpleChaincode struct {
-			 	}
-			
-			// ============================================================================================================================
-			// Main
-			// ============================================================================================================================
-			func main() {
-			err := shim.Start(new(SimpleChaincode))
-							if err != nil {
-								fmt.Printf("Error starting Simple chaincode: %s", err)
 			}
+			
+			// =======================
+			// Main
+			// =======================
+			func main() {
+			     err := shim.Start(new(SimpleChaincode))
+				 if err != nil {
+				 fmt.Printf("Error starting Simple chaincode: %s", err)
+			}
+			
 		'''
 	}
 
 	def doFuncInit(DefinitionBody body) {
 		'''
-		func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+			func (t *SimpleChaincode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+				
+			}
 			
-		}'''
+		'''
 	}
 
-	// 
+	// «doInvokeClause(functions.get(0))»
 	def doFuncInvoke(EList<FunctionDefinition> functions) {
 		'''
+		// ============================================================================================================================
+		// Invoke - Our entry point
+		// ============================================================================================================================
 		func (t *SimpleChaincode) Invoke(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
 			// Handle different functions
-				if function == "init" {
-					return t.Init(stub, "init", args)
-				} 
-				«functions.forEach[it.doInvokeClause()]»
-				
-				fmt.Println("invoke did not find func: " + function)
+			if function == "init" {
+				return t.Init(stub, "init", args)
+			} 
+			«FOR f : functions BEFORE 'else '»
+				«doInvokeClause(f)»
+			«ENDFOR»
+			fmt.Println("invoke did not find func: " + function)
 			
-				return nil, errors.New("Received unknown function invocation")
-		}'''
+			return nil, errors.New("Received unknown function invocation")
+		}
+			
+		'''
 	}
 
 	def doInvokeClause(FunctionDefinition function) {
 		'''
-			else if function == "«function.name»" {
-			  return t.«function.name»(stub, args)
-			}
+		if function == "«function.name»" {
+		  return t.«function.name»(stub, args)
+		}
 		'''
 	}
 
 	def doFuncQuery(EList<FunctionDefinition> functions) {
 		'''
-		func (t *SimpleChaincode) Query(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+			// ============================================================================================================================
+			// Query - Our entry point for Queries
+			// ============================================================================================================================
+			func (t *SimpleChaincode) Query(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+				// Handle different functions
+				«FOR f : functions»
+					«doInvokeClause(f)»
+				«ENDFOR»
+				fmt.Println("query did not find func: " + function)
+				
+				return nil, errors.New("Received unknown function query")
+			}
 			
-		}'''
+		'''
 	}
 
 	def doFunctions(EList<FunctionDefinition> functions) {
@@ -123,115 +209,76 @@ class SolidityGenerator implements IGenerator {
 
 	def doFunction(FunctionDefinition function) {
 		'''
-		func (t *SimpleChaincode) «function.name»(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
-			
-		}'''
+			func (t *SimpleChaincode) «function.name»(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+				«FOR stmt : function.block.statements»
+					«IF stmt instanceof ExpressionStatement»
+					  write("«((stmt.expression as Assignment).left as QualifiedIdentifier).identifier »", «extractValue((stmt.expression as Assignment).expression)»)
+					«ELSEIF stmt instanceof ReturnStatement»
+					  read("«extractValue((stmt as ReturnStatement).expression)»")
+					«ELSE»
+					  stmt.toString
+					«ENDIF»
+							
+				«ENDFOR»
+			}
+		'''
 	}
 
-// doGenerate
-//
-//	def doBody(DefinitionBody body) {
-//		var ret = ''
-//
-//		for (vd : body.variables) {
-//			ret += doVariableDeclaration(vd) + '\n'
-//		}
-//
-//		for (function : body.functions) {
-//			ret += doFunction(function) + '\n'
-//		}
-//
-//		for (modifier : body.modifiers) {
-//			ret += doModifier(modifier) + '\n'
-//		}
-//
-//		for (enum : body.enums) {
-//			ret += doEnum(enum) + '\n'
-//		}
-//
-//		for (event : body.events) {
-//			ret += doEvent(event) + '\n'
-//		}
-//		ret
-//	} // doBody
-//	
-//	def doEnum(EnumDefinition definition) {
-//		'''enum'''
-//	}
-//
-//	def doEvent(Event event) { '''''' }
-//
-//	
-//	def doModifier(Modifier modifier) {
-//		'''modifier'''
-//	}
-//
-//	def CharSequence doFunction(
-//		FunctionDefinition fd) {
-//		'''function «fd.name» «doParameterlist(fd.parameters)» «doFunctionDefinitionOptionalElements(fd.optionalElements)»{
-//			 «doBlock(fd.block)»
-//		}'''
-//	} // doFunction
-//
-//	def doBlock(Block block) {
-//		'''this is the body'''
-//	} // doBlock
-//
-//	def doFunctionDefinitionOptionalElements(EList<FunctionDefinitionOptionalElement> list) {
-//		var ret = ''
-//		for (opElement : list) {
-//			if (opElement instanceof Const) {
-//				ret += "constant"
-//			}
-////			switch opElement {
-////				case Const: 
-////				default: ret += ''
-////			}
-//			ret += ' '
-//		}
-//		ret
-//	} // doFunctionDefinitionOptionalElements	
-//
-//	def doParameterlist(ParameterList parameters) {
-//		var varDefs = ''
-//		for (vd : parameters.parameters) {
-//			varDefs += doVariableDeclaration(vd)
-//		}
-//		'''(«varDefs»)'''
-//	} // doParameterlist
-//
-//	def doVariableDefinition(Statement statement) {
-//		'''foo'''
-//	}
-//
-//	def doVariableDeclaration(Statement statement) {
-//		switch statement {
-//			 StandardVariableDeclaration: doStandardVariableDeclaration(statement)
-//			 VarVariableDeclaration: 'varvariable'
-//			 VarVariableTupleVariableDeclaration: "vartuple"
-//			
-//			default: ''
-//		}
-//	}
-//	
-//	def doStandardVariableDeclaration(StandardVariableDeclaration svd) {
-//		var ret ='''«doStandardType(svd.type)» «doVariable(svd.variable)»'''
-//		if (svd.expression != null) {
-//			ret += ''' = «doExpression(svd.expression)»'''
-//		}
-//		ret
-//	}
-//	
-//	def doVariable(Variable variable) {
-//		variable.name
-//	}
-//	
-//	def doStandardType(EObject object) {
-//		'''standard'''
-//	}
-//	
-//	
-//	def doExpression(Expression expression) {
-//		'''expression'''
-//	}
+	def extractValue(Expression expr) {
+		switch expr {
+			QualifiedIdentifier: expr.identifier
+			default: expr.toString
+		}
+	}
+
+	def doWriteFunc() {'''
+	// ============================================================================================================================
+	// write - invoke function to write key/value pair
+	// ============================================================================================================================
+	func (t *SimpleChaincode) write(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+		var name, value string
+		var err error
+		fmt.Println("running write()")
+	
+		if len(args) != 2 {
+			return nil, errors.New("Incorrect number of arguments. Expecting 2. name of the variable and value to set")
+		}
+	
+		name = args[0]                            //rename for funsies
+		value = args[1]
+		err = stub.PutState(name, []byte(value))  //write the variable into the chaincode state
+		if err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	'''
+		
+	}
+	
+	def doReadFunc() {'''
+	// ============================================================================================================================
+	// read - query function to read key/value pair
+	// ============================================================================================================================
+	func (t *SimpleChaincode) read(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+		var name, jsonResp string
+		var err error
+	
+		if len(args) != 1 {
+			return nil, errors.New("Incorrect number of arguments. Expecting name of the var to query")
+		}
+	
+		name = args[0]
+		valAsbytes, err := stub.GetState(name)
+		if err != nil {
+			jsonResp = "{\"Error\":\"Failed to get state for " + name + "\"}"
+			return nil, errors.New(jsonResp)
+		}
+	
+		return valAsbytes, nil
+	}
+	
+	'''
+		
+	}
 } // SolidityGenerator
