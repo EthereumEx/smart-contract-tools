@@ -131,7 +131,7 @@ class HyperledgerTemplates {
 		'''
 		func (t *SimpleChaincode) «function.name»(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
 			«FOR stmt : function.block.statements»
-				doStatment(stmt)
+				«doStatement(stmt)»
 			«ENDFOR»
 		}
 		'''
@@ -142,7 +142,7 @@ class HyperledgerTemplates {
 		«IF statement instanceof ExpressionStatement»
 			write("«((statement.expression as Assignment).left as QualifiedIdentifier).identifier »", «Utilities.extractValue((statement.expression as Assignment).expression)»)
 		«ELSEIF statement instanceof ReturnStatement»
-			read("«Utilities.extractValue((statement as ReturnStatement).expression)»")
+			return read("«Utilities.extractValue((statement as ReturnStatement).expression)»")
 		«ELSEIF statement instanceof IfStatement»
 			«doIfStatement( statement as IfStatement)»
 		«ELSE»
